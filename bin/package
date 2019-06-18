@@ -1,0 +1,147 @@
+#!/usr/bin/env node
+
+async function main(options, info) {
+  const {basename, dirname, relative, resolve} = require('path');
+  const {fork} = require('child_process');
+
+  const stat = require('util').promisify(require('fs').stat);
+
+  async function _resolvePath(...elements) {
+    const filepath = resolve(...elements);
+    try {
+      await stat(filepath);
+      return filepath;
+    } catch (e) {}
+  }
+
+  async function _resolveExtensionPath(...elements) {
+    const prefix = elements.slice(0, elements.length - 1);
+    const last = elements[elements.length - 1];
+    return (
+      await _resolvePath(...prefix, `${last}.jsx`) ||
+      await _resolvePath(...prefix, `${last}.js`) ||
+      await _resolvePath(...prefix, `${last}.json`) ||
+      await _resolvePath(...prefix, last)
+    );
+  }
+
+  async function _resolvePackageFile(dir, name) {
+    return (
+      await _resolvePath(dir, 'node_modules', name, 'package.json') ||
+      await _resolveExtensionPath(dir, 'node_modules', name, 'index') ||
+      await _resolveExtensionPath(dir, 'node_modules', name) ||
+      dirname(dir) !== dir && await _resolvePackageFile(dirname(dir), name)
+    );
+  }
+
+  async function resolveFile(dir, name) {
+    return (
+      await _resolvePackageFile(dir, name) ||
+      await _resolveExtensionPath(dir, name, 'index') ||
+      await _resolveExtensionPath(dir, name)
+    );
+  }
+
+  let dir = options.filepath;
+  if ((await stat(options.filepath)).isFile()) {
+    dir = dirname(options.filepath);
+  }
+
+  const files = new Set([await resolveFile(dir, options.filepath)]);
+
+  for (const filepath of files) {
+    if (!filepath || !filepath.startsWith(dir) || relative(dir, filepath).includes('node_modules')) {
+      continue;
+    }
+    // info.dependencies.add('./' + relative(dir, filepath));
+
+    const relpath = './' + relative(dir, filepath);
+
+    try {
+      const child = fork(require.resolve('./file'), [filepath], {stdio: 'pipe'});
+      child.stdin.end(options.buffer);
+      const fileInfo = JSON.parse(await read(child.stdout));
+
+      fileInfo.filename = basename(filepath);
+      fileInfo.filepath = relpath;
+      fileInfo.resolved = {};
+
+      info.bytes += fileInfo.bytes;
+      info.chars += fileInfo.chars;
+      info.files[relpath] = fileInfo;
+
+      for (const dep of fileInfo.dependencies) {
+        const deppath = await resolveFile(dirname(filepath), dep);
+        if (deppath && (relative(dir, deppath).includes('node_modules') || !deppath.startsWith(dir))) {
+          info.dependencies.add(dep);
+          continue;
+        }
+        if (deppath) {
+          fileInfo.resolved[dep] = './' + relative(dir, deppath);
+        }
+        files.add(deppath);
+      }
+    } catch (e) {
+      info.files[relpath] = {
+        error: e.constructor.name,
+        message: e.message,
+        stack: e.stack
+      };
+    }
+  }
+
+  return info;
+}
+
+async function read(stream) {
+  const pieces = [];
+  for await (const buf of stream) {
+    pieces.push(buf);
+  }
+  const length = pieces.reduce((a, {length}) => a + length, 0);
+  const full = Buffer.alloc(length);
+  let index = 0;
+  for (const buf of pieces) {
+    buf.copy(full, index);
+    index += buf.length;
+  }
+  return full;
+}
+
+async function execute() {
+  const options = {
+    filename: '',
+    filepath: '',
+    buffer: null,
+    source: '',
+  };
+
+  if (process.argv.length > 2) {
+    const fs = require('fs');
+    const {resolve} = require('path');
+
+    options.filename = process.argv[2];
+    options.filepath = resolve(options.filename);
+  } else {
+    // stdin support
+    // options.source = ...
+  }
+
+  const infoBase = {
+    bytes: 0,
+    chars: 0,
+    dependencies: new Set(),
+    files: {}
+  };
+
+  const info = await main(options, infoBase);
+
+  const infoJSON = Object.assign({}, info);
+  infoJSON.dependencies = Array.from(infoJSON.dependencies);
+
+  process.stdout.write(JSON.stringify(infoJSON));
+}
+
+if (process.mainModule === module) {
+  execute();
+}

@@ -1,7 +1,10 @@
 {
   "name": "pkg-lens",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "bin/package",
+  "bin": {
+    "lens": "bin/package"
+  },
   "author": "Michael \"Z\" Goddard <mzgoddard@gmail.com>",
   "license": "MIT",
   "dependencies": {
