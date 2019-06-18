@@ -1,0 +1,14 @@
+{
+  "name": "pkg-lens",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Michael \"Z\" Goddard <mzgoddard@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@babel/parser": "^7.4.5",
+    "@babel/types": "^7.4.4",
+    "acorn": "^6.1.1",
+    "acorn-loose": "^6.0.0",
+    "acorn-walk": "^6.1.1"
+  }
+}

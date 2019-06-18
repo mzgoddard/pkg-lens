@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+
+if (process.mainModule === module) {
+  const fs = require('fs');
+  const {resolve} = require('path');
+  const {parse: babelParse} = require('@babel/parser');
+  const types = require('@babel/types');
+  const {traverse: babelWalk} = require('@babel/types');
+  const {parse: acornParse} = require('acorn-loose');
+  const {simple: simpleWalk} = require('acorn-walk');
+
+  const options = {
+    filename: '',
+    filepath: '',
+    source: '',
+  };
+
+  if (process.argv.length > 2) {
+    options.filename = process.argv[2];
+    options.filepath = resolve(options.filename);
+    options.source = fs.readFileSync(options.filepath, 'utf8');
+  } else {
+    // stdin support
+    // options.source = ...
+  }
+
+  const babelAst = babelParse(options.source);
+
+  babelWalk(babelAst, {
+    enter(node, ancestors, state) {
+      const dependency = types.isCallExpression(node) &&
+        types.isIdentifier(node.callee) &&
+        node.callee.name === 'require' &&
+        node.arguments[0].value;
+    },
+    exit(node, ancestors, state) {
+      
+    },
+  }, {
+    scope: {
+      node: babelAst,
+      variables: {},
+    },
+    scopes: [],
+  });
+
+  // console.log(babelAst);
+
+  const acornAst = acornParse(options.source);
+
+  // console.log(acornAst);
+}
