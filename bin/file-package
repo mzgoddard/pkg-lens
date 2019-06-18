@@ -1,23 +1,21 @@
 #!/usr/bin/env node
 
-async function main(options) {
-  const {resolve} = require('path');
-  const {fork} = require('child_process');
+async function main (options, info) {
+  const pkg = JSON.parse(options.source);
 
-  const maybePackageJson = options.source.startsWith('{');
-  const maybeJavascript = true;
-
-  if (maybePackageJson) {
-    try {
-      const child = fork(require.resolve('./file-package'), [], {stdio: 'pipe'});
-      child.stdin.end(options.buffer);
-      return JSON.parse(await read(child.stdout));
-    } catch (e) {}
+  if (pkg.browser) {
+    info.dependencies.add(pkg.browser);
+  } else if (pkg.main) {
+    info.dependencies.add(pkg.main);
+  } else if (!pkg.browser && !pkg.main) {
+    info.dependencies.add('index.js');
   }
 
-  const child = fork(require.resolve('./file-javascript'), [], {stdio: 'pipe'});
-  child.stdin.end(options.buffer);
-  return JSON.parse(await read(child.stdout));
+  // if (pkg.bin) {
+  //   info.dependencies.add(...Object.values(pkg.bin));
+  // }
+
+  return info;
 }
 
 async function read(stream) {
@@ -52,13 +50,24 @@ async function execute() {
     options.buffer = fs.readFileSync(options.filepath);
   } else {
     // stdin support
-    // options.source = ...
     options.buffer = await read(process.stdin);
   }
 
   options.source = new TextDecoder().decode(options.buffer);
 
-  process.stdout.write(JSON.stringify(await main(options)));
+  const infoBase = {
+    bytes: options.buffer.length,
+    chars: options.source.length,
+    dependencies: new Set(),
+    imports: {},
+  };
+
+  const info = await main(options, infoBase);
+
+  const infoJSON = Object.assign({}, info);
+  infoJSON.dependencies = Array.from(infoJSON.dependencies.values());
+
+  process.stdout.write(JSON.stringify(infoJSON));
 }
 
 if (process.mainModule === module) {
