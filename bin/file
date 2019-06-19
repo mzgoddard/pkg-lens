@@ -1,5 +1,43 @@
 #!/usr/bin/env node
 
+const parserPath = {
+  javascript: require.resolve('./file-javascript'),
+  package: require.resolve('./file-package'),
+};
+
+async function _fileOne(type, buffer) {
+  const {fork} = require('child_process');
+  const child = fork(parserPath[type], [], {stdio: 'pipe'});
+  child.stdin.end(buffer);
+  // child.stderr.pipe(process.stderr);
+  // console.error('wait');
+  const infoString = await read(child.stdout);
+  // console.error(type, 'stdout:', infoString.toString());
+  const info = JSON.parse(infoString.toString());
+  child.kill();
+  // console.error('kill');
+  return info;
+}
+
+let _fileProcess = {};
+function _fileShared(type, buffer) {
+  const {fork} = require('child_process');
+  if (!_fileProcess[type]) {
+    _fileProcess[type] = fork(parserPath[type], [], {stdio: 'pipe'});
+    _fileProcess[type].stderr.pipe(process.stderr);
+    process.on('exit', () => {
+      _fileProcess[type].kill();
+    });
+  }
+
+  _fileProcess[type].send(buffer);
+  return new Promise((resolve, reject) => {
+    _fileProcess[type].once('message', fileInfo => {
+      resolve(JSON.parse(fileInfo));
+    });
+  });
+}
+
 async function main(options) {
   const {resolve} = require('path');
   const {fork} = require('child_process');
@@ -7,24 +45,26 @@ async function main(options) {
   const maybePackageJson = options.source.startsWith('{');
   const maybeJavascript = true;
 
+  // console.error(options.buffer.length);
   if (maybePackageJson) {
     try {
-      const child = fork(require.resolve('./file-package'), [], {stdio: 'pipe'});
-      child.stdin.end(options.buffer);
-      return JSON.parse(await read(child.stdout));
-    } catch (e) {}
+      return await _fileOne('package', options.buffer);
+    } catch (e) {
+      // console.error(e.stack);
+    }
   }
 
-  const child = fork(require.resolve('./file-javascript'), [], {stdio: 'pipe'});
-  child.stdin.end(options.buffer);
-  return JSON.parse(await read(child.stdout));
+  return await _fileShared('javascript', options.buffer);
 }
 
 async function read(stream) {
   const pieces = [];
+  stream.on('end', () => console.error('stream end'));
   for await (const buf of stream) {
+    // console.error(buf.length);
     pieces.push(buf);
   }
+  // console.error('end');
   const length = pieces.reduce((a, {length}) => a + length, 0);
   const full = Buffer.alloc(length);
   let index = 0;
@@ -33,6 +73,14 @@ async function read(stream) {
     index += buf.length;
   }
   return full;
+}
+
+function toUtf8(buffer) {
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder().decode(buffer);
+  } else {
+    return buffer.toString();
+  }
 }
 
 async function execute() {
@@ -51,12 +99,25 @@ async function execute() {
     options.filepath = resolve(options.filename);
     options.buffer = fs.readFileSync(options.filepath);
   } else {
+    process.on('message', async filepath => {
+      const fs = require('fs');
+      const buffer = fs.readFileSync(filepath);
+      const source = toUtf8(buffer);
+      const options = {
+        filename: filepath,
+        filepath,
+        buffer,
+        source,
+      };
+      process.send(JSON.stringify(await main(options)));
+    });
+
     // stdin support
     // options.source = ...
     options.buffer = await read(process.stdin);
   }
 
-  options.source = new TextDecoder().decode(options.buffer);
+  options.source = toUtf8(options.buffer);
 
   process.stdout.write(JSON.stringify(await main(options)));
 }

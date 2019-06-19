@@ -1,5 +1,35 @@
 #!/usr/bin/env node
 
+async function _fileOne(filepath) {
+  const {fork} = require('child_process');
+  // console.log(0);
+  const child = fork(require.resolve('./file'), [filepath], {stdio: 'pipe'});
+  // console.log(1);
+  child.stdin.end(null);
+  // console.log(2);
+  // child.stderr.pipe(process.stderr);
+  // console.log(3);
+  return JSON.parse(await read(child.stdout));
+}
+
+let _fileProcess;
+function _fileShared(filepath) {
+  if (!_fileProcess) {
+    const {fork} = require('child_process');
+    _fileProcess = fork(require.resolve('./file'), [], {stdio: 'pipe'});
+    process.on('exit', () => {
+      _fileProcess.kill();
+    });
+  }
+
+  _fileProcess.send(filepath);
+  return new Promise((resolve, reject) => {
+    _fileProcess.once('message', fileInfo => {
+      resolve(JSON.parse(fileInfo));
+    });
+  });
+}
+
 async function main(options, info) {
   const {basename, dirname, relative, resolve} = require('path');
   const {fork} = require('child_process');
@@ -58,9 +88,12 @@ async function main(options, info) {
     const relpath = './' + relative(dir, filepath);
 
     try {
-      const child = fork(require.resolve('./file'), [filepath], {stdio: 'pipe'});
-      child.stdin.end(options.buffer);
-      const fileInfo = JSON.parse(await read(child.stdout));
+      // console.log('a');
+      const fileInfo = await _fileShared(filepath);
+      // console.log('b');
+      // const child = fork(require.resolve('./file'), [filepath], {stdio: 'pipe'});
+      // child.stdin.end(options.buffer);
+      // const fileInfo = JSON.parse(await read(child.stdout));
 
       fileInfo.filename = basename(filepath);
       fileInfo.filepath = relpath;
@@ -140,6 +173,8 @@ async function execute() {
   infoJSON.dependencies = Array.from(infoJSON.dependencies);
 
   process.stdout.write(JSON.stringify(infoJSON));
+
+  process.exit(0);
 }
 
 if (process.mainModule === module) {

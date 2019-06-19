@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
+function interopRequire(object) {
+  return object.default || object;
+}
+
 async function main (options, info) {
   const {parse: babelParse} = require('@babel/parser');
-  const types = require('@babel/types');
-  const {traverse: babelWalk} = require('@babel/types');
-  const {parse: acornParse} = require('acorn-loose');
-  const {simple: simpleWalk} = require('acorn-walk');
+  const types = interopRequire(require('@babel/types/lib/validators/generated'));
+  const babelWalk = interopRequire(require('@babel/types/lib/traverse/traverse'));
+  // const {parse: acornParse} = require('acorn-loose');
+  // const {simple: simpleWalk} = require('acorn-walk');
 
   const babelAst = babelParse(options.source);
 
@@ -51,7 +55,7 @@ async function main (options, info) {
 
   // console.log(babelAst);
 
-  const acornAst = acornParse(options.source);
+  // const acornAst = acornParse(options.source);
 
   // console.log(acornAst);
 
@@ -73,6 +77,14 @@ async function read(stream) {
   return full;
 }
 
+function toUtf8(buffer) {
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder().decode(buffer);
+  } else {
+    return buffer.toString();
+  }
+}
+
 async function execute() {
   const fs = require('fs');
   const {resolve} = require('path');
@@ -84,17 +96,46 @@ async function execute() {
     source: '',
   };
 
+  // console.error('argv', process.argv);
   if (process.argv.length > 2) {
     options.filename = process.argv[2];
     options.filepath = resolve(options.filename);
     options.buffer = fs.readFileSync(options.filepath);
   } else {
+    process.on('message', async buffer => {
+      buffer = Buffer.from(buffer);
+      const source = toUtf8(buffer);
+      const options = {
+        filename: '',
+        filepath: '',
+        buffer,
+        source,
+      };
+
+      const infoBase = {
+        bytes: options.buffer.length,
+        chars: options.source.length,
+        dependencies: new Set(),
+        imports: {},
+      };
+
+      const info = await main(options, infoBase);
+
+      const infoJSON = Object.assign({}, info, {
+        dependencies: Array.from(info.dependencies),
+      });
+
+      process.send(JSON.stringify(infoJSON));
+    });
+
     // stdin support
     // options.source = ...
+    // console.error('read');
     options.buffer = await read(process.stdin);
+    // console.error('red', options.buffer.length);
   }
 
-  options.source = new TextDecoder().decode(options.buffer);
+  options.source = toUtf8(options.buffer);
 
   const infoBase = {
     bytes: options.buffer.length,
@@ -103,12 +144,19 @@ async function execute() {
     imports: {},
   };
 
+  // console.error('y');
   const info = await main(options, infoBase);
+  // console.error('z');
 
   const infoJSON = Object.assign({}, info);
   infoJSON.dependencies = Array.from(infoJSON.dependencies.values());
 
-  process.stdout.write(JSON.stringify(infoJSON));
+  // console.error('write');
+  // console.error(JSON.stringify(infoJSON));
+  process.stdout.end(JSON.stringify(infoJSON));
+  // console.error('wrote', Buffer.byteLength(JSON.stringify(infoJSON)));
+
+  process.exit(0);
 }
 
 if (process.mainModule === module) {
