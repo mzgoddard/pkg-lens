@@ -141,6 +141,22 @@ async function read(stream) {
   return full;
 }
 
+async function write(stream, buffer) {
+  if (!Buffer.isBuffer(buffer)) {
+    buffer = Buffer.from(buffer);
+  }
+
+  let index = 0;
+  while (index < buffer.length) {
+    if (!stream.write(buffer.slice(index, index + 8192))) {
+      await new Promise(resolve => {
+        stream.once('drain', resolve);
+      });
+    }
+    index += 8192;
+  }
+}
+
 async function execute() {
   const options = {
     filename: '',
@@ -172,7 +188,7 @@ async function execute() {
   const infoJSON = Object.assign({}, info);
   infoJSON.dependencies = Array.from(infoJSON.dependencies);
 
-  process.stdout.write(JSON.stringify(infoJSON));
+  await write(process.stdout, JSON.stringify(infoJSON));
 
   process.exit(0);
 }

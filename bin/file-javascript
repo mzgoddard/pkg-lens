@@ -31,9 +31,18 @@ async function main (options, info) {
         node.arguments[0];
       if (types.isStringLiteral(requireArg)) {
         state.info.dependencies.add(requireArg.value);
+      } else {
+        state.info.dependencies.add('*');
       }
 
-      const requireResolveArg = types.isMemberExpression(node.callee) &&
+      const storeRequire = types.isAssignmentExpression(node) &&
+        types.isIdentifier(node.right) && node.right.name === 'require';
+      if (storeRequire) {
+        state.info.dependencies.add('*');
+      }
+
+      const requireResolveArg = types.isCallExpression(node) &&
+        types.isMemberExpression(node.callee) &&
         types.isIdentifier(node.callee.object) &&
         node.callee.object.name === 'require' &&
         types.isIdentifier(node.callee.property) &&
@@ -41,6 +50,18 @@ async function main (options, info) {
         node.arguments[0];
       if (types.isStringLiteral(requireResolveArg)) {
         state.info.dependencies.add(requireResolveArg.value);
+      } else {
+        state.info.dependencies.add('*');
+      }
+
+      const storeRequireResolve = types.isAssignmentExpression(node) &&
+        types.isMemberExpression(node.right) &&
+        types.isIdentifier(node.right.object) &&
+        node.right.object.name === 'require' &&
+        types.isIdentifier(node.right.property) &&
+        node.right.property.name === 'resolve';
+      if (storeRequireResolve) {
+        state.info.dependencies.add('*');
       }
 
       const importDecl = types.isImportDeclaration(node) && node;
